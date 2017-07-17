@@ -29,6 +29,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+from elasticsearch import Elasticsearch, helpers, exceptions as es_exceptions
 
 PARSER = argparse.ArgumentParser(description='This code indexes geo info into ES.')
 PARSER.add_argument('-i', '--input', help='Input file name', required=True)
@@ -44,6 +45,9 @@ if not os.path.isfile(DB_PATH):
     sys.exit()
 ENGINE = create_engine('sqlite:///%s' % DB_PATH, echo=False)
 BASE = declarative_base(ENGINE)
+
+es = Elasticsearch([{'host':'atlas-kibana.mwt2.org', 'port':9200}],timeout=60)
+docs_to_store=[]
 
 # debug containers
 NOTEXPANDED = set()  # store the GeoModel objects which are not expanded
@@ -338,7 +342,7 @@ def getPhysVolChildrenExpanded(parentId, jsonOut=False):
     return childrenDict
 
 
-def get_all_nodes(node, tags, current_transform, current_depth=0, max_depth=1):
+def get_all_nodes(node, tags, current_transform, current_depth, max_depth):
     """ Main function that starts traverse. Not recursively callable """
 
     print("*" * current_depth, end=' ')
@@ -381,14 +385,16 @@ def get_all_nodes(node, tags, current_transform, current_depth=0, max_depth=1):
 
         if node_type == "GeoPhysVol" or node_type == "GeoFullPhysVol":
             #get_phys_vol_children(node, tags, current_transform, current_depth+1, max_depth)
-            #node_item_expanded = get_physvol_item(node)
-            #generate_document(node_item_expanded, current_depth, tags, folded_transform)
-            print(node.as_dict())
+            phys_vol_expanded = get_physvol_item(node)
+            generate_document(phys_vol_expanded, current_depth, tags, folded_transform)
+            
+            #print(node.as_dict())
 
             if current_depth < max_depth:
                 get_all_nodes(node, tags, folded_transform, current_depth+1, max_depth)
             if current_depth+1 in tags: # can't leave them hanging
                 del tags[current_depth+1]
+            continue
 
         #else:
         #    continue
@@ -419,7 +425,7 @@ def get_phys_vol_children(node, tags, current_transform, current_depth=0, max_de
 def get_physvol_item(item):
     ''' returns physvol content with logvol replaced with it's content '''
     item_dict = item.as_dict()
-    # print("item_dict:", item_dict)
+    #print("item_dict:", item_dict)
     if not 'logvol' in item_dict:
         print("Error! Item is not a GeoPhysVol!")
         # print item_dict
@@ -494,7 +500,7 @@ def generate_document(item, depth, tags, transform):
     print('-'*20)
     doc = {}
     doc['depth'] = depth
-    doc['tags'] = tags
+    doc['tags'] = [ v for v in tags.values() ]
     doc['transform'] = transform.matrix()
     sit = item['logvol']['object']
     doc['shape'] = sit['shape']['type']
@@ -502,7 +508,11 @@ def generate_document(item, depth, tags, transform):
     doc['material'] = sit['material']['name']
     doc['name'] = sit['name']
     print(doc)
+    doc['_index'] = 'atlas_geo'
+    doc['_type'] = 'vol'
     print('-'*20)
+    docs_to_store.append(doc)
+
 
 
 
@@ -532,6 +542,23 @@ def dumpAllObjects(jsonOut=False, jsonFile=False):
 
     return out
 
+def store(docs):
+    """ bulk indexing """
+    print('storing', len(docs), 'volumes')
+    try:
+        res = helpers.bulk(es, docs, raise_on_exception=True, request_timeout=60)
+        #print("inserted:",res[0], '\tErrors:',res[1])
+    except es_exceptions.ConnectionError as e:
+        print('ConnectionError ', e)
+    except es_exceptions.TransportError as e:
+        print('TransportError ', e)
+    except helpers.BulkIndexError as e:
+        print(e[0])
+        for i in e[1]:
+            print(i)
+    except Exception as e:
+        print('Something seriously wrong happened.', e)
+    print('done')
 
 def get_class_by_tablename(table_fullname):
     """Return class reference mapped to table.
@@ -556,17 +583,18 @@ if __name__ == "__main__":
 
     SESSION = load_session()
 
+    # get the root PhysVol volume
+    ROOT = SESSION.query(RootVolume).one()
+    print("rootVol:", ROOT.as_dict())
+
+    get_all_nodes(ROOT, {}, Transf(), 0, 20)
+    store(docs_to_store)
+
     # get a dict with all tables
     #print "\nout [Python dict]:", dumpAllObjects() # to screen as Python dict
     #print "\nout [JSON]:", dumpAllObjects(jsonOut=True) # to screen as JSON
 
     #dumpAllObjects( jsonFile = args.output+".json" ) # to file as JSON
-
-    # get the root PhysVol volume
-    ROOT = SESSION.query(RootVolume).one()
-    print("rootVol:", ROOT.as_dict())
-    
-    get_all_nodes(ROOT, tags={}, current_transform=Transf(), max_depth=2)
 
     # get the children of the root PhysVol in the compact format
     # print getPhysVolChildren(ROOT.id) # compact format, only tableId and
@@ -592,8 +620,6 @@ if __name__ == "__main__":
     # get output in JSON format, on the screen
     # print get_all_nodes_recurse(ROOT.id, depth=3, jsonOut=True)
     # # two levels of children
-
-    print('\n\n')
 
     # get_all_nodes_recurse(ROOT.id, depth=3) # two levels of
     # children
