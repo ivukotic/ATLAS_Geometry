@@ -346,13 +346,15 @@ def get_all_nodes(node, tags, current_transform, current_depth, max_depth):
     """ Main function that starts traverse. Not recursively callable """
 
     print("*" * current_depth, end=' ')
-    print("node - ", node.as_dict())
+    print("node - ", node.__tablename__, node.as_dict())
     #print("node-  id:", node.id, "\ttable:", node.volTable)
 
-    if current_depth==0: #root node
+    if current_depth==0 or node.__tablename__ == 'PhysVols': #root node
         children = get_children_of_this_vol(node.id, 1)
     else:
-        children = get_children_of_this_vol(node.id, node.logvol)
+        if node.__tablename__=='FullPhysVols':
+            children = get_children_of_this_vol(node.id, 2) 
+            
 
     if not children:
         print("no children. Returns...")
@@ -403,16 +405,11 @@ def get_all_nodes(node, tags, current_transform, current_depth, max_depth):
         #elif (node_type == "GeoSerialTransformer"):
         #    (volId, nodeItemExpanded) = getSerialTransformerItemExpanded(node)
         # nodeItemExpanded = get_all_nodes_recurse(volId, depth-1, nodeItemExpanded['vol'])
-        # else:
+        else:
             # print "WARNING!! node type", nodeType, "not expanded"
-            #NOTEXPANDED.add(node_type)
+            NOTEXPANDED.add(node_type)
             #node_item_expanded = node.as_dict()
 
-
-        # if node_type == 'GeoPhysVol' or node_type == "GeoFullPhysVol":  # only these can branch
-        #     get_all_nodes_recurse(node, tags, folded_transform, current_depth+1, max_depth)
-        #     if current_depth+1 in tags: # can't leave them hanging
-        #         del tags[current_depth+1]
     return
 
 def get_phys_vol_children(node, tags, current_transform, current_depth=0, max_depth=1):
@@ -487,14 +484,6 @@ def getSerialTransformerItemExpanded(item):
 
 
 
-
-
-def getPhysVol():
-    pass
-
-
-
-
 def generate_document(item, depth, tags, transform):
     """ this will produce full json doc to index """
     print('-'*20)
@@ -512,6 +501,8 @@ def generate_document(item, depth, tags, transform):
     doc['_type'] = 'vol'
     print('-'*20)
     docs_to_store.append(doc)
+    if len(docs_to_store)>1000:
+        store(docs_to_store)
 
 
 
@@ -558,6 +549,7 @@ def store(docs):
             print(i)
     except Exception as e:
         print('Something seriously wrong happened.', e)
+    docs=[]
     print('done')
 
 def get_class_by_tablename(table_fullname):
@@ -587,7 +579,7 @@ if __name__ == "__main__":
     ROOT = SESSION.query(RootVolume).one()
     print("rootVol:", ROOT.as_dict())
 
-    get_all_nodes(ROOT, {}, Transf(), 0, 20)
+    get_all_nodes(ROOT, {}, Transf(), 0, 3)
     store(docs_to_store)
 
     # get a dict with all tables
