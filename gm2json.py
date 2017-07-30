@@ -501,7 +501,7 @@ def generate_document(item, depth, tags, transform):
     doc['_type'] = 'vol'
     print('-'*20)
     docs_to_store.append(doc)
-    if len(docs_to_store)>1000:
+    if len(docs_to_store)>999:
         store(docs_to_store)
 
 
@@ -549,7 +549,7 @@ def store(docs):
             print(i)
     except Exception as e:
         print('Something seriously wrong happened.', e)
-    docs=[]
+    docs.clear()
     print('done')
 
 def get_class_by_tablename(table_fullname):
@@ -579,7 +579,7 @@ if __name__ == "__main__":
     ROOT = SESSION.query(RootVolume).one()
     print("rootVol:", ROOT.as_dict())
 
-    get_all_nodes(ROOT, {}, Transf(), 0, 3)
+    get_all_nodes(ROOT, {}, Transf(), 0, 20)
     store(docs_to_store)
 
     # get a dict with all tables
